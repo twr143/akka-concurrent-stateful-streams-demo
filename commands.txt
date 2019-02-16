@@ -1,0 +1,16 @@
+{
+"$type":"login",
+"username":"admin",
+"password":"admin"
+}
+
+{
+  "$type": "add_item",
+  "item": {
+    "id":5,
+    "name": "Item name 1"
+  }
+}
+{"$type": "unsubscribe_changes"}
+{"$type": "subscribe_changes"}
+{"$type": "remove_item","id":1}
