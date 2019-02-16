@@ -72,11 +72,4 @@ object WSMultipleClientEntry extends StreamWrapperApp2 {
     }
     checkPromise.future
   }
-
-  def resultSink(implicit as: ActorSystem, ec: ExecutionContext, logger: Logger): Sink[List[Future[Done]], Future[Done]] =
-    Sink.foreach {
-      list: List[Future[Done]] =>
-        logger.warn(s"reached resultSink, size ${list.size}")
-        Future.sequence(list)
-    }
 }
