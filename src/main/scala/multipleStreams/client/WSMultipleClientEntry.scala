@@ -25,7 +25,7 @@ object WSMultipleClientEntry extends StreamWrapperApp2 {
 
   override def body(args: Array[String])(implicit as: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext, logger: Logger): Future[Any] = {
     //
-    def incoming(description: String): Sink[Message, Future[Done]] =
+    def outgoing(description: String): Sink[Message, Future[Done]] =
       Sink.foreach {
         case message: TextMessage.Strict =>
           val out = readFromArray[Outgoing](message.text.getBytes("UTF-8"))
@@ -61,14 +61,14 @@ object WSMultipleClientEntry extends StreamWrapperApp2 {
 
     val r = Source.fromIterator(() => Iterator.range(7, 25))
       .flatMapMerge(10, i => aggSource(i) /*.throttle(100, 200.millis)*/ .viaMat(webSocketFlow)(Keep.right)
-        .alsoToMat(incoming("main:"))(Keep.both)
+        .alsoToMat(outgoing("main:"))(Keep.both)
       ).runWith(Sink.ignore)
     val checkPromise = Promise[Done]()
     r.onComplete {
       case Success(_) =>
         //check the number of items left in the list
         Source.combine[Incoming, Incoming](loginSource, subscribeSource)(Concat(_)).map(incoming => TextMessage(writeToArray[Incoming](incoming)))
-          .viaMat(webSocketFlow)(Keep.right).alsoToMat(incoming("check:"))(Keep.both).runWith(Sink.ignore).onComplete { case Success(_) => checkPromise.complete(Success(Done)) }
+          .viaMat(webSocketFlow)(Keep.right).alsoToMat(outgoing("check:"))(Keep.both).runWith(Sink.ignore).onComplete { case Success(_) => checkPromise.complete(Success(Done)) }
     }
     checkPromise.future
   }
