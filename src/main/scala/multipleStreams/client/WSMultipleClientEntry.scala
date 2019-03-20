@@ -12,7 +12,7 @@ import ch.qos.logback.classic.Logger
 import com.github.plokhotnyuk.jsoniter_scala.core.{readFromArray, writeToArray}
 import multipleStreams.Model._
 import util.StreamWrapperApp2
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import multipleStreams.Util._
 import scala.util.Success
@@ -59,17 +59,15 @@ object WSMultipleClientEntry extends StreamWrapperApp2 {
     def webSocketFlow: Flow[Message, Message, Future[WebSocketUpgradeResponse]] = Http().webSocketClientFlow(
       WebSocketRequest("ws://localhost:9000/ws_api"))
 
-    val r = Source.fromIterator(() => Iterator.range(7, 25))
-      .flatMapMerge(10, i => aggSource(i) /*.throttle(100, 200.millis)*/ .viaMat(webSocketFlow)(Keep.right)
-        .alsoToMat(outgoing("main:"))(Keep.both)
-      ).runWith(Sink.ignore)
-    val checkPromise = Promise[Done]()
-    r.onComplete {
-      case Success(_) =>
-        //check the number of items left in the list
-        Source.combine[Incoming, Incoming](loginSource, subscribeSource)(Concat(_)).map(incoming => TextMessage(writeToArray[Incoming](incoming)))
-          .viaMat(webSocketFlow)(Keep.right).alsoToMat(outgoing("check:"))(Keep.both).runWith(Sink.ignore).onComplete { case Success(_) => checkPromise.complete(Success(Done)) }
-    }
-    checkPromise.future
+    for {
+      _ <- Source.fromIterator(() => Iterator.range(7, 25))
+        .flatMapMerge(10, i => aggSource(i) /*.throttle(100, 200.millis)*/ .viaMat(webSocketFlow)(Keep.right)
+          .alsoToMat(outgoing("main:"))(Keep.both)
+        ).runWith(Sink.ignore)
+
+      //check the number of items left in the list
+      r <- Source.combine[Incoming, Incoming](loginSource, subscribeSource)(Concat(_)).map(incoming => TextMessage(writeToArray[Incoming](incoming)))
+        .viaMat(webSocketFlow)(Keep.right).alsoToMat(outgoing("check:"))(Keep.both).runWith(Sink.ignore)
+    } yield r
   }
 }
