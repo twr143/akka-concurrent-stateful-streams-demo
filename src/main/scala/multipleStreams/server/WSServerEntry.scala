@@ -1,7 +1,5 @@
 package multipleStreams.server
-
 import java.util.UUID
-
 import akka.{Done, NotUsed}
 import akka.actor.{ActorRef, ActorSystem, PoisonPill, Props}
 import akka.event.Logging
@@ -12,7 +10,6 @@ import akka.http.scaladsl.model.headers.{Authorization, BasicHttpCredentials}
 import akka.stream.scaladsl.{Flow, Sink, Source}
 import akka.stream._
 import com.github.plokhotnyuk.jsoniter_scala.core.{JsonParseException, readFromArray, writeToArray}
-
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.FiniteDuration
 import scala.io.StdIn
@@ -25,7 +22,6 @@ import akka.stream.contrib.Implicits.TimedFlowDsl
 import ch.qos.logback.classic.{Level, Logger}
 import multipleStreams.server.StateHolder.RemoveSubscriber
 import util.StreamWrapperApp2
-
 import scala.collection.mutable.ListBuffer
 import scala.collection.{immutable, mutable}
 import scala.concurrent.duration._
@@ -38,7 +34,6 @@ import scala.concurrent.duration._
 object WSServerEntry extends StreamWrapperApp2 {
 
   val CORE_COUNT = 2
-
 
   val countNum = 1000
 
@@ -67,7 +62,7 @@ object WSServerEntry extends StreamWrapperApp2 {
         .watchTermination()((_, futDone: Future[Done]) =>
           futDone.onComplete {
             case Success(_) ⇒
-//              logger.warn("stream related to {} has finished",requestRouter)
+//                            logger.warn("stream related to {} has finished",elementRouter)
               stateHolder ! RemoveSubscriber(elementRouter)
             case Failure(t) ⇒ logger.error(s"router flow failed for req: $reqId")
           })
@@ -75,10 +70,10 @@ object WSServerEntry extends StreamWrapperApp2 {
           case tm: TextMessage ⇒ tm.textStream
         }
         .mapAsync(CORE_COUNT * 2 - 1)(in ⇒ in.runFold("")(_ + _)
-          .map(in ⇒ readFromArray[Incoming](in.getBytes("UTF-8"))))
+          .map(bytesToBeanIn))
         .zipWithIndex
         .timedIntervalBetween(_._2 % countNum == 0, timeCheck).map(_._1)
-        .map(m => IncomingMessage(m, reqId, elementRouter))
+        .map(IncomingMessage(_, reqId, elementRouter))
         .to(Sink.actorRef[IncomingMessage](elementRouter, PoisonPill))
         .withAttributes(ActorAttributes.supervisionStrategy(decider(elementRouter, reqId)))
       val outgoing: Source[Message, NotUsed] =
@@ -88,7 +83,7 @@ object WSServerEntry extends StreamWrapperApp2 {
             elementRouter ! Connected(outActor)
             NotUsed
           }.keepAlive(10.seconds, () => OutgoingMessage(Pong(Random.nextInt(100))))
-          .mapAsync(CORE_COUNT * 2 - 1)(o => Future.successful(o.obj).map(writeToArray[Outgoing](_)).map(TextMessage(_)))
+          .mapAsync(CORE_COUNT * 2 - 1)(o => Future.successful(outgoingToTextMessageStrict(o.obj)))
       Flow.fromSinkAndSource(incoming, outgoing).via(sharedKS.flow)
     }
 

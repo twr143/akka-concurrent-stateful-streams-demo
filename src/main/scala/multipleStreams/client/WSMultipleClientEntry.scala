@@ -6,10 +6,10 @@ import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.model.headers.{Authorization, BasicHttpCredentials}
 import akka.http.scaladsl.model.ws.{Message, TextMessage, WebSocketRequest, WebSocketUpgradeResponse}
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.stream.{ActorMaterializer, ThrottleMode}
+import akka.stream.{ActorMaterializer, KillSwitches, ThrottleMode}
 import akka.stream.scaladsl.{Concat, Flow, Keep, Sink, Source}
 import ch.qos.logback.classic.Logger
-import com.github.plokhotnyuk.jsoniter_scala.core.{readFromArray, writeToArray}
+import com.github.plokhotnyuk.jsoniter_scala.core._
 import multipleStreams.Model._
 import util.StreamWrapperApp2
 import scala.concurrent.{ExecutionContext, Future}
@@ -28,7 +28,7 @@ object WSMultipleClientEntry extends StreamWrapperApp2 {
     def outgoing(description: String): Sink[Message, Future[Done]] =
       Sink.foreach {
         case message: TextMessage.Strict =>
-          val out = readFromArray[Outgoing](message.text.getBytes("UTF-8"))
+          val out = bytesToBeanOut(message.text)
           out match {
             case _: ItemAdded | _: ItemRemoved =>
             case theRest =>
@@ -53,21 +53,26 @@ object WSMultipleClientEntry extends StreamWrapperApp2 {
       subscribeSource,
       newItemsSource(index),
       removeItemsSource(index)
-    )(Concat(_)).map(incoming => TextMessage(writeToArray[Incoming](incoming))
-    )
+    )(Concat(_)).map(incomingToTextMessageStrict)
 
-    def webSocketFlow: Flow[Message, Message, Future[WebSocketUpgradeResponse]] = Http().webSocketClientFlow(
+    def webSocketFlow: () => Flow[Message, Message, Future[WebSocketUpgradeResponse]] = () => Http().webSocketClientFlow(
       WebSocketRequest("ws://localhost:9000/ws_api"))
 
+    val lastSnk = Sink.last[Any]
     for {
-      _ <- Source.fromIterator(() => Iterator.range(7, 25))
-        .flatMapMerge(10, i => aggSource(i) /*.throttle(100, 200.millis)*/ .viaMat(webSocketFlow)(Keep.right)
-          .alsoToMat(outgoing("main:"))(Keep.both)
-        ).runWith(Sink.ignore)
-
+      _ <- {
+        val (ks, last) = Source.fromIterator(() => Iterator.range(7, 25))
+          .flatMapMerge(10, i => aggSource(i) /*.throttle(100, 200.millis)*/ .viaMat(webSocketFlow())(Keep.right)
+            .alsoToMat(outgoing("main:"))(Keep.both)
+          ).viaMat(KillSwitches.single)(Keep.right).toMat(lastSnk)(Keep.both).run()
+        last.andThen { case _ =>
+          logger.warn("stream completed, ks works")
+        }
+        last
+      }
       //check the number of items left in the list
-      r <- Source.combine[Incoming, Incoming](loginSource, subscribeSource)(Concat(_)).map(incoming => TextMessage(writeToArray[Incoming](incoming)))
-        .viaMat(webSocketFlow)(Keep.right).alsoToMat(outgoing("check:"))(Keep.both).runWith(Sink.ignore)
+            r <- Source.combine[Incoming, Incoming](loginSource, subscribeSource)(Concat(_)).map(incomingToTextMessageStrict)
+              .viaMat(webSocketFlow())(Keep.right).alsoToMat(outgoing("check:"))(Keep.both).runWith(Sink.ignore)
     } yield r
   }
 }

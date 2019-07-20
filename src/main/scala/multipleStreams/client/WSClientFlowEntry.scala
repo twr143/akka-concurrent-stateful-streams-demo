@@ -36,8 +36,7 @@ object WSClientFlowEntry extends StreamWrapperApp2 {
     val incoming: Sink[Message, Future[Done]] =
       Sink.foreach {
         case message: TextMessage.Strict =>
-          val out = readFromArray[Outgoing](message.text.getBytes("UTF-8"))
-          logger.warn(out.toString)
+          bytesToBeanOut.andThen(_.toString).andThen(logger.warn)(message.text)
       }
     //
     val (start, end) = (args(0).toInt, args(1).toInt)
@@ -55,8 +54,7 @@ object WSClientFlowEntry extends StreamWrapperApp2 {
 
       /*,maybeSource*/
       // if we wish infinite stream
-    )(Concat(_)).map(i => TextMessage(writeToArray[Incoming](i))
-    )
+    )(Concat(_)).map(incomingToTextMessageStrict )
     //
     val webSocketFlow = Http().webSocketClientFlow(
       WebSocketRequest("ws://localhost:9000/ws_api",
