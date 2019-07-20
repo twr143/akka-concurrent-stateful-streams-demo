@@ -19,7 +19,7 @@ class StateHolder(routerManager: ActorRef)(implicit logger: Logger) extends Acto
 
   def receive: PartialFunction[Any, Unit] = {
     case IncomingMessage(o, reqId, routerActor) =>
-      sender() ! Some(o).map(businessLogic(reqId, routerActor, routerManager)).get
+      sender() ! businessLogic(reqId, routerActor, routerManager).lift(o).get
     case RemoveSubscriber(s) =>
       subscribersToRemove += s
   }
