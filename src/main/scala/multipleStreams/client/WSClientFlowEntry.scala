@@ -1,5 +1,4 @@
 package multipleStreams.client
-
 /**
   * Created by Ilya Volynin on 11.11.2018 at 20:24.
   */
@@ -16,11 +15,9 @@ import ch.qos.logback.classic.Logger
 import com.github.plokhotnyuk.jsoniter_scala.core.{readFromArray, writeToArray}
 import multipleStreams.Model._
 import util.StreamWrapperApp2
-
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
 import multipleStreams.Util._
-
 import scala.util.Success
 
 // run in parallel:
@@ -33,7 +30,7 @@ import scala.util.Success
  */
 object WSClientFlowEntry extends StreamWrapperApp2 {
 
-  override def body(args: Array[String])(implicit as: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext, logger:Logger): Future[Any] = {
+  override def body(args: Array[String])(implicit as: ActorSystem, mat: ActorMaterializer, ec: ExecutionContext, logger: Logger): Future[Any] = {
     if (args.length != 2) return Future.failed(new Exception("please provide first and last indexes of range for adding table as program arguments. Thanks."))
     //
     val incoming: Sink[Message, Future[Done]] =
@@ -78,20 +75,17 @@ object WSClientFlowEntry extends StreamWrapperApp2 {
       .viaMat(webSocketFlow)(Keep.right) // keep the materialized Future[WebSocketUpgradeResponse]
       .toMat(incoming)(Keep.both) // also keep the Future[Done]
       .run()
-    val connected = upgradeResponse.flatMap { upgrade =>
+    upgradeResponse.flatMap { upgrade =>
       if (upgrade.response.status == StatusCodes.SwitchingProtocols) {
+        logger.warn(s"resp status ${upgrade.response}")
         Future.successful(Done)
       } else {
-        val f = Unmarshal(upgrade.response.entity).to[String]
-        f.onComplete {
+        Unmarshal(upgrade.response.entity).to[String].andThen {
           case Success(s) =>
             throw new RuntimeException(s"Connection failed: ${upgrade.response.status} $s")
         }
-        f
       }
-    }
-
-    connected.onComplete(tr => logger.warn(tr.toString))
+    }.andThen { case tr => logger.warn(tr.toString) }
     closed.onComplete(_ => logger.warn("closed"))
     closed
   }
